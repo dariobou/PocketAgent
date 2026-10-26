@@ -1,0 +1,1 @@
+"""GhostPilot Telegram bot package."""

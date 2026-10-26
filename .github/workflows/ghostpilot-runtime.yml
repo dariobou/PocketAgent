@@ -1,0 +1,89 @@
+name: GhostPilot Ephemeral Runtime
+
+on:
+  workflow_dispatch:
+    inputs:
+      chat_id:
+        description: "Telegram Chat ID to report progress"
+        required: true
+        type: string
+      initial_prompt:
+        description: "User prompt to execute"
+        required: true
+        type: string
+      target_repo:
+        description: "Target repository to clone and edit (owner/repo)"
+        required: false
+        type: string
+        default: ""
+      agent:
+        description: "Coding agent to use (claude, codex, gemini)"
+        required: false
+        type: string
+        default: "claude"
+
+concurrency:
+  group: ghostpilot-session-${{ inputs.chat_id }}
+  cancel-in-progress: false
+
+jobs:
+  run-sandbox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout GhostPilot Engine
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Cache Global NPM CLIs
+        uses: actions/cache@v4
+        id: npm-cache
+        with:
+          path: ~/.npm-global
+          key: ${{ runner.os }}-npm-clis-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-clis-
+
+      - name: Install Agent CLIs
+        run: |
+          mkdir -p ~/.npm-global
+          npm config set prefix ~/.npm-global
+          export PATH="$HOME/.npm-global/bin:$PATH"
+          npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli || true
+          echo "$HOME/.npm-global/bin" >> $GITHUB_PATH
+
+      - name: Install GhostPilot Engine
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Run GhostPilot Sandbox Session
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ALLOWED_USER_IDS: ${{ secrets.TELEGRAM_ALLOWED_USER_IDS }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          CLOUDFLARE_WORKER_URL: ${{ secrets.CLOUDFLARE_WORKER_URL }}
+          GITHUB_PAT: ${{ secrets.GITHUB_PAT }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CODEX_AUTH_JSON_B64: ${{ secrets.CODEX_AUTH_JSON_B64 }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_OAUTH_B64: ${{ secrets.GEMINI_OAUTH_B64 }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TELEGRAM_CHAT_ID: ${{ inputs.chat_id }}
+          INITIAL_PROMPT: ${{ inputs.initial_prompt }}
+          TARGET_REPO: ${{ inputs.target_repo }}
+          ACTIVE_AGENT: ${{ inputs.agent }}
+        run: |
+          python -m ghostpilot.main

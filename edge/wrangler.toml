@@ -1,0 +1,19 @@
+name = "ghostpilot-edge"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+[triggers]
+crons = ["*/15 * * * *"]
+
+[vars]
+GH_OWNER = "your-github-username"
+GH_REPO = "PocketAgent"
+GH_BRANCH = "main"
+DEFAULT_TARGET_REPO = "your-github-username/target-repo"
+WORKER_PUBLIC_URL = "https://ghostpilot-edge.<your-subdomain>.workers.dev"
+TELEGRAM_ALLOWED_USER_IDS = "123456789"
+
+# Sensitive variables to set with `wrangler secret put <KEY>`:
+# - TELEGRAM_BOT_TOKEN
+# - TELEGRAM_WEBHOOK_SECRET
+# - GH_DISPATCH_TOKEN (GitHub PAT with 'workflow' or 'repo' scope)

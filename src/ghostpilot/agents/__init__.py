@@ -1,0 +1,1 @@
+"""GhostPilot agent adapters package."""
