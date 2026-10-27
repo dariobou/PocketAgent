@@ -33,4 +33,4 @@ jobs:
 
       - name: Run Pytest Suite
         run: |
-          pytest -vv --tb=short
+          pytest -vv --tb=short 2>&1 | tee pytest_output.log

@@ -1,7 +1,6 @@
 """Unit tests for Telegram streamer, 3800-char splitting, and rate limit handling."""
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -40,31 +39,38 @@ async def test_streamer_debounce_and_chunking():
     mock_client.send_message = AsyncMock(return_value={"message_id": 1001})
     mock_client.edit_message_text = AsyncMock(return_value=True)
 
-    buffer = TelegramStreamBuffer(
-        client=mock_client,
-        chat_id=12345,
-        debounce_interval=0.1,  # Short interval for test
-        initial_prefix="Prefix:\n",
-    )
+    current_time = 1000.0
 
-    # 1. First append creates message
-    await buffer.append("Token 1 ")
-    assert mock_client.send_message.call_count == 1
-    assert buffer.current_message_id == 1001
+    def fake_time():
+        return current_time
 
-    # 2. Rapid append within debounce window should NOT immediately call edit
-    await buffer.append("Token 2 ")
-    assert mock_client.edit_message_text.call_count == 0
+    with patch("ghostpilot.bot.streamer.time.time", side_effect=fake_time):
+        buffer = TelegramStreamBuffer(
+            client=mock_client,
+            chat_id=12345,
+            debounce_interval=1.5,
+            initial_prefix="Prefix:\n",
+        )
 
-    # 3. Wait past debounce interval and append again -> triggers edit
-    await asyncio.sleep(0.12)
-    await buffer.append("Token 3 ")
-    assert mock_client.edit_message_text.call_count == 1
+        # 1. First append creates message (last_edit_time set to 1000.0)
+        await buffer.append("Token 1 ")
+        assert mock_client.send_message.call_count == 1
+        assert buffer.current_message_id == 1001
 
-    # 4. Finalize flushes everything
-    await buffer.finalize("Done.")
-    assert mock_client.edit_message_text.call_count == 2
-    assert buffer.is_finalized is True
+        # 2. Rapid append within debounce window (time unchanged) -> does NOT edit
+        current_time = 1000.5
+        await buffer.append("Token 2 ")
+        assert mock_client.edit_message_text.call_count == 0
+
+        # 3. Advance past debounce interval -> triggers edit
+        current_time = 1002.0
+        await buffer.append("Token 3 ")
+        assert mock_client.edit_message_text.call_count == 1
+
+        # 4. Finalize flushes everything
+        await buffer.finalize("Done.")
+        assert mock_client.edit_message_text.call_count == 2
+        assert buffer.is_finalized is True
 
 
 @pytest.mark.asyncio
@@ -74,18 +80,26 @@ async def test_streamer_rollover_on_large_text():
     mock_client.send_message = AsyncMock(side_effect=[{"message_id": 101}, {"message_id": 102}])
     mock_client.edit_message_text = AsyncMock(return_value=True)
 
-    buffer = TelegramStreamBuffer(
-        client=mock_client,
-        chat_id=12345,
-        debounce_interval=0.01,
-        initial_prefix="",
-    )
+    current_time = 1000.0
 
-    # Append 3000 chars
-    await buffer.append("A" * 3000)
-    assert buffer.current_message_id == 101
+    def fake_time():
+        return current_time
 
-    # Append another 1000 chars -> total 4000 > MAX_MESSAGE_CHARS (3800) -> triggers rollover
-    await buffer.append("B" * 1000)
-    assert mock_client.send_message.call_count == 2
-    assert buffer.current_message_id == 102
+    with patch("ghostpilot.bot.streamer.time.time", side_effect=fake_time):
+        buffer = TelegramStreamBuffer(
+            client=mock_client,
+            chat_id=12345,
+            debounce_interval=1.5,
+            initial_prefix="",
+        )
+
+        # Append 3000 chars
+        await buffer.append("A" * 3000)
+        assert buffer.current_message_id == 101
+
+        # Append another 1000 chars -> total 4000 > MAX_MESSAGE_CHARS (3800) -> triggers rollover
+        current_time = 1002.0
+        await buffer.append("B" * 1000)
+        assert mock_client.send_message.call_count == 2
+        assert buffer.current_message_id == 102
+
