@@ -38,9 +38,11 @@ def test_classify_risk_mutating():
 @pytest.mark.asyncio
 async def test_hitl_confirm_approval_flow(mock_settings: Settings):
     telegram_dispatched = []
+    notified_event = asyncio.Event()
 
     async def mock_notifier(req: Any):
         telegram_dispatched.append(req.request_id)
+        notified_event.set()
 
     app = create_app(mock_settings, telegram_notifier=mock_notifier)
     transport = ASGITransport(app=app)
@@ -61,8 +63,8 @@ async def test_hitl_confirm_approval_flow(mock_settings: Settings):
 
         post_task = asyncio.create_task(send_post())
 
-        # Wait briefly for request to hit the server and register future
-        await asyncio.sleep(0.05)
+        # Wait deterministically for request to hit the server and notify
+        await asyncio.wait_for(notified_event.wait(), timeout=5.0)
         assert "req-1234" in telegram_dispatched
         assert "req-1234" in app.state.hitl_state.pending_approvals
 
@@ -82,7 +84,12 @@ async def test_hitl_confirm_approval_flow(mock_settings: Settings):
 
 @pytest.mark.asyncio
 async def test_hitl_confirm_deny_flow(mock_settings: Settings):
-    app = create_app(mock_settings)
+    notified_event = asyncio.Event()
+
+    async def mock_notifier(req: Any):
+        notified_event.set()
+
+    app = create_app(mock_settings, telegram_notifier=mock_notifier)
     transport = ASGITransport(app=app)
 
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -97,7 +104,7 @@ async def test_hitl_confirm_deny_flow(mock_settings: Settings):
         post_task = asyncio.create_task(
             client.post("/internal/hitl/confirm", json=req_payload)
         )
-        await asyncio.sleep(0.05)
+        await asyncio.wait_for(notified_event.wait(), timeout=5.0)
 
         # Simulate user tapping [Deny]
         app.state.hitl_state.resolve_approval(
@@ -115,7 +122,12 @@ async def test_hitl_confirm_deny_flow(mock_settings: Settings):
 
 @pytest.mark.asyncio
 async def test_hitl_trust_session_flow(mock_settings: Settings):
-    app = create_app(mock_settings)
+    notified_event = asyncio.Event()
+
+    async def mock_notifier(req: Any):
+        notified_event.set()
+
+    app = create_app(mock_settings, telegram_notifier=mock_notifier)
     transport = ASGITransport(app=app)
 
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -130,7 +142,7 @@ async def test_hitl_trust_session_flow(mock_settings: Settings):
         post_task = asyncio.create_task(
             client.post("/internal/hitl/confirm", json=req_payload1)
         )
-        await asyncio.sleep(0.05)
+        await asyncio.wait_for(notified_event.wait(), timeout=5.0)
 
         # Simulate user tapping [Trust Session]
         app.state.hitl_state.resolve_approval(
@@ -159,7 +171,7 @@ async def test_hitl_trust_session_flow(mock_settings: Settings):
 @pytest.mark.asyncio
 async def test_hitl_timeout_flow(mock_settings: Settings):
     # Set short timeout for testing
-    mock_settings.hitl_timeout_seconds = 0.1
+    mock_settings.hitl_timeout_seconds = 0.2
     app = create_app(mock_settings)
     transport = ASGITransport(app=app)
 
